@@ -25,6 +25,19 @@ EXCLUDE_ALIASES = re.compile(
     r"^(year|date|seq|no|s\.?no|#|row|id|index)$", re.IGNORECASE
 )
 
+SITE_PATTERNS = [
+    (re.compile(r'\b(DXB|DUBAI)\b',          re.IGNORECASE), "Dubai"),
+    (re.compile(r'\b(SHJ|SHARJAH)\b',        re.IGNORECASE), "Sharjah"),
+    (re.compile(r'\b(AJM|AJMN|AJMAN)\b',     re.IGNORECASE), "Ajman"),
+    (re.compile(r'\bCLINICS?\b',             re.IGNORECASE), "Clinics"),
+]
+
+def detect_site(sheet_name):
+    for pattern, site in SITE_PATTERNS:
+        if pattern.search(sheet_name):
+            return site
+    return "Unknown"
+
 
 def find_col(columns, pattern):
     for col in columns:
@@ -124,7 +137,7 @@ def load_company(path):
             df = xl.parse(sheet)
             pairs = load_sheet(df, sheet.strip())
             for label, rates in pairs:
-                networks.append({"network": label, "rates": rates})
+                networks.append({"network": label, "site": detect_site(sheet), "rates": rates})
         except Exception as e:
             print(f"\n  Warning: Skipping sheet '{sheet}': {e}", end="")
     print(f" -> {len(networks)} networks")
@@ -227,6 +240,7 @@ def main():
             stats = compute_network_stats(net["rates"], reference)
             nets_json.append({
                 "network": net["network"],
+                "site": net["site"],
                 **stats,
                 "rates": net["rates"],
             })

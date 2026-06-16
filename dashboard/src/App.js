@@ -41,6 +41,57 @@ const STATUS = {
   below:   { bg: C.redLt,    text: C.red,   border: "#FCA5A5", label: "Below",   icon: TrendingDown, fill: C.red },
 };
 
+// ─── Site filter ──────────────────────────────────────────────────────────────
+const SITES = ["Dubai", "Sharjah", "Ajman", "Clinics"];
+
+function filterBySite(data, sites) {
+  if (!sites.length) return data;
+  return {
+    ...data,
+    companies: data.companies
+      .map(co => ({ ...co, networks: co.networks.filter(n => sites.includes(n.site)) }))
+      .filter(co => co.networks.length > 0),
+  };
+}
+
+function SiteFilterBar({ sites, onChange }) {
+  return (
+    <div style={{
+      background: C.white, borderBottom: `1px solid ${C.border}`,
+      padding: "8px 28px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: .5, marginRight: 4 }}>
+        Site
+      </span>
+      {SITES.map(s => {
+        const on = sites.includes(s);
+        return (
+          <button key={s} onClick={() => onChange(on ? sites.filter(x => x !== s) : [...sites, s])} style={{
+            padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", border: `1.5px solid ${on ? C.teal : C.border}`,
+            background: on ? C.teal : C.white, color: on ? C.white : C.slate,
+            transition: "all .15s",
+          }}>
+            {s}
+          </button>
+        );
+      })}
+      {sites.length > 0 && (
+        <button onClick={() => onChange([])} style={{
+          padding: "4px 10px", borderRadius: 20, fontSize: 11, cursor: "pointer",
+          border: "none", background: "transparent", color: C.muted, fontWeight: 600,
+          display: "flex", alignItems: "center", gap: 3,
+        }}>
+          <X size={10} /> Clear
+        </button>
+      )}
+      {sites.length === 0 && (
+        <span style={{ fontSize: 11, color: C.muted, marginLeft: 2 }}>All sites shown</span>
+      )}
+    </div>
+  );
+}
+
 // ─── MultiSelect ──────────────────────────────────────────────────────────────
 function MultiSelect({ label, options, selected, onChange, width = 180 }) {
   const [open, setOpen] = useState(false);
@@ -1174,6 +1225,7 @@ export default function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [authed,          setAuthed]          = useState(false);
   const [sessionExpires,  setSessionExpires]  = useState(null);
+  const [siteFilter,      setSiteFilter]      = useState([]);
 
   // Restore session on mount
   useEffect(() => {
@@ -1220,15 +1272,18 @@ export default function App() {
     </div>
   );
 
+  const filteredData = useMemo(() => data ? filterBySite(data, siteFilter) : data, [data, siteFilter]);
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", background: C.canvas }}>
       <Nav view={view} setView={setView} generatedAt={data.generated_at}
         refCount={data.reference_count} plCount={data.pricelist_count}
         onLogout={logout} sessionExpires={sessionExpires} />
-      {view === "Summary"        && <SummaryView       data={data} onSelectCompany={(c) => { setSelectedCompany(c); setView("Company Detail"); }} />}
-      {view === "Company Detail" && <CompanyDetailView data={data} selectedCompany={selectedCompany} onSelectCompany={setSelectedCompany} />}
-      {view === "Full Table"     && <FullTableView      data={data} />}
-      {view === "CPT Deep Dive"  && <CptDeepDiveView    data={data} />}
+      <SiteFilterBar sites={siteFilter} onChange={setSiteFilter} />
+      {view === "Summary"        && <SummaryView       data={filteredData} onSelectCompany={(c) => { setSelectedCompany(c); setView("Company Detail"); }} />}
+      {view === "Company Detail" && <CompanyDetailView data={filteredData} selectedCompany={selectedCompany} onSelectCompany={setSelectedCompany} />}
+      {view === "Full Table"     && <FullTableView      data={filteredData} />}
+      {view === "CPT Deep Dive"  && <CptDeepDiveView    data={filteredData} />}
     </div>
   );
 }
