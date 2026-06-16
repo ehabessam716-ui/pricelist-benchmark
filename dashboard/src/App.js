@@ -982,11 +982,78 @@ function CptDeepDiveView({ data }) {
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
+const PASSWORD = "123";
+const AUTH_KEY = "sgh_bench_auth";
+
+function PasswordGate({ onAuth }) {
+  const [input, setInput]   = useState("");
+  const [shake, setShake]   = useState(false);
+
+  function attempt() {
+    if (input === PASSWORD) {
+      localStorage.setItem(AUTH_KEY, "1");
+      onAuth();
+    } else {
+      setShake(true);
+      setInput("");
+      setTimeout(() => setShake(false), 600);
+    }
+  }
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: C.canvas,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        background: C.white, borderRadius: 16, padding: "48px 40px",
+        boxShadow: "0 8px 32px rgba(0,95,115,.13)", width: 360, textAlign: "center",
+        transform: shake ? "translateX(0)" : undefined,
+        animation: shake ? "shake .5s ease" : undefined,
+      }}>
+        <img src={process.env.PUBLIC_URL + "/sgh.png"} alt="SGH"
+          style={{ height: 56, marginBottom: 24, filter: `brightness(0) saturate(100%) invert(19%) sepia(63%) saturate(800%) hue-rotate(163deg) brightness(90%) contrast(101%)` }} />
+        <div style={{ fontSize: 20, fontWeight: 800, color: C.teal, marginBottom: 6 }}>
+          Pricelist Benchmark
+        </div>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 32 }}>
+          Enter password to continue
+        </div>
+        <input
+          type="password"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && attempt()}
+          placeholder="Password"
+          autoFocus
+          style={{
+            width: "100%", padding: "10px 14px", fontSize: 15,
+            border: `1.5px solid ${C.border}`, borderRadius: 8,
+            outline: "none", marginBottom: 14, color: C.teal,
+            fontFamily: "inherit",
+          }}
+        />
+        <button onClick={attempt} style={{
+          width: "100%", padding: "11px 0", background: C.teal,
+          color: C.white, border: "none", borderRadius: 8,
+          fontSize: 15, fontWeight: 700, cursor: "pointer",
+        }}>
+          Access Dashboard
+        </button>
+      </div>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}`}</style>
+    </div>
+  );
+}
+
 export default function App() {
+  const [authed, setAuthed] = useState(() => localStorage.getItem(AUTH_KEY) === "1");
   const [data,            setData]            = useState(null);
   const [error,           setError]           = useState(null);
   const [view,            setView]            = useState("Summary");
   const [selectedCompany, setSelectedCompany] = useState(null);
+
+  if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
 
   useEffect(() => {
     fetch(process.env.PUBLIC_URL + "/benchmark_data.json")
