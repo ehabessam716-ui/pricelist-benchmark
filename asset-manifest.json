@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/pricelist-benchmark/static/css/main.f450b118.css",
-    "main.js": "/pricelist-benchmark/static/js/main.9bcbacdb.js",
+    "main.js": "/pricelist-benchmark/static/js/main.55122bcf.js",
     "static/js/453.70e9d1a8.chunk.js": "/pricelist-benchmark/static/js/453.70e9d1a8.chunk.js",
     "index.html": "/pricelist-benchmark/index.html",
     "main.f450b118.css.map": "/pricelist-benchmark/static/css/main.f450b118.css.map",
-    "main.9bcbacdb.js.map": "/pricelist-benchmark/static/js/main.9bcbacdb.js.map",
+    "main.55122bcf.js.map": "/pricelist-benchmark/static/js/main.55122bcf.js.map",
     "453.70e9d1a8.chunk.js.map": "/pricelist-benchmark/static/js/453.70e9d1a8.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.f450b118.css",
-    "static/js/main.9bcbacdb.js"
+    "static/js/main.55122bcf.js"
   ]
 }
