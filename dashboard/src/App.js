@@ -1244,6 +1244,9 @@ export default function App() {
 
   function logout() { clearSession(); setAuthed(false); setData(null); setError(null); setSessionExpires(null); }
 
+  // Must be before any early return — hooks must always run in same order
+  const filteredData = useMemo(() => data ? filterBySite(data, siteFilter) : null, [data, siteFilter]);
+
   if (!authed) return <PasswordGate onAuth={handleAuth} />;
 
   if (error) return (
@@ -1271,8 +1274,6 @@ export default function App() {
       </div>
     </div>
   );
-
-  const filteredData = useMemo(() => data ? filterBySite(data, siteFilter) : data, [data, siteFilter]);
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", background: C.canvas }}>
