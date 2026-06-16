@@ -989,7 +989,7 @@ export default function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
 
   useEffect(() => {
-    fetch("/benchmark_data.json")
+    fetch(process.env.PUBLIC_URL + "/benchmark_data.json")
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((d)  => { setData(d); setSelectedCompany(d.companies[0]?.company || null); })
       .catch((e) => setError(e.message));
