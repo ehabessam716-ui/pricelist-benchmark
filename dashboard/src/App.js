@@ -174,7 +174,7 @@ function Nav({ view, setView, generatedAt, refCount, plCount }) {
       {/* SGH Logo */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 28, padding: "8px 0", flexShrink: 0 }}>
         <img
-          src="/sgh.png"
+          src={process.env.PUBLIC_URL + "/sgh.png"}
           alt="Saudi German Hospital"
           style={{ height: 44, width: "auto", objectFit: "contain", filter: "brightness(0) invert(1)" }}
           onError={(e) => { e.target.style.display = "none"; }}
@@ -1009,7 +1009,7 @@ export default function App() {
   if (!data) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", minHeight: "100vh", gap: 16, background: C.canvas }}>
-      <img src="/sgh.png" alt="SGH" style={{ height: 52, opacity: .7 }}
+      <img src={process.env.PUBLIC_URL + "/sgh.png"} alt="SGH" style={{ height: 52, opacity: .7 }}
         onError={(e) => { e.target.style.display = "none"; }} />
       <div style={{ color: C.slate, fontSize: 14, fontWeight: 600 }}>Loading benchmark data…</div>
       <div style={{ display: "flex", gap: 6 }}>
