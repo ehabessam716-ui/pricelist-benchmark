@@ -8,9 +8,6 @@ __pycache__/
 data/companies/
 data/reference/
 
-# The root-level benchmark_data.json (dashboard/public/ has the copy)
-/benchmark_data.json
-
 # Node / React
 node_modules/
 dashboard/node_modules/
