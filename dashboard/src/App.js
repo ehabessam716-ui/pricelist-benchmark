@@ -164,7 +164,22 @@ const VIEWS = [
   { id: "CPT Deep Dive",  icon: Target    },
 ];
 
-function Nav({ view, setView, generatedAt, refCount, plCount }) {
+function Nav({ view, setView, generatedAt, refCount, plCount, onLogout, sessionExpires }) {
+  const [timeLeft, setTimeLeft] = useState("");
+  useEffect(() => {
+    function update() {
+      if (!sessionExpires) return;
+      const ms = sessionExpires - Date.now();
+      if (ms <= 0) { onLogout(); return; }
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      setTimeLeft(`${h}h ${m}m`);
+    }
+    update();
+    const t = setInterval(update, 30000);
+    return () => clearInterval(t);
+  }, [sessionExpires, onLogout]);
+
   return (
     <div style={{
       background: C.teal, padding: "0 28px", display: "flex", alignItems: "center",
@@ -200,19 +215,33 @@ function Nav({ view, setView, generatedAt, refCount, plCount }) {
         </button>
       ))}
 
-      {/* Meta */}
-      <div style={{
-        marginLeft: "auto", display: "flex", alignItems: "center", gap: 6,
-        background: "rgba(255,255,255,.1)", borderRadius: 20, padding: "5px 12px",
-        border: "1px solid rgba(255,255,255,.12)",
-      }}>
-        <RefreshCw size={10} color={C.muted} />
-        <span style={{ fontSize: 11, color: C.muted }}>{plCount} networks · {refCount?.toLocaleString()} codes</span>
-        {generatedAt && (
-          <span style={{ fontSize: 11, color: C.mint, fontWeight: 700 }}>
-            · {new Date(generatedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+      {/* Meta + Session + Logout */}
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "rgba(255,255,255,.1)", borderRadius: 20, padding: "5px 12px",
+          border: "1px solid rgba(255,255,255,.12)",
+        }}>
+          <RefreshCw size={10} color={C.muted} />
+          <span style={{ fontSize: 11, color: C.muted }}>{plCount} networks · {refCount?.toLocaleString()} codes</span>
+          {generatedAt && (
+            <span style={{ fontSize: 11, color: C.mint, fontWeight: 700 }}>
+              · {new Date(generatedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+            </span>
+          )}
+        </div>
+        {timeLeft && (
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,.4)", whiteSpace: "nowrap" }}>
+            session {timeLeft}
           </span>
         )}
+        <button onClick={onLogout} style={{
+          padding: "5px 12px", background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.2)",
+          borderRadius: 20, color: "rgba(255,255,255,.7)", fontSize: 11, fontWeight: 600,
+          cursor: "pointer", whiteSpace: "nowrap",
+        }}>
+          Log out
+        </button>
       </div>
     </div>
   );
@@ -982,64 +1011,156 @@ function CptDeepDiveView({ data }) {
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-const PASSWORD = "123";
-const AUTH_KEY = "sgh_bench_auth";
+// ─── Security Helpers ─────────────────────────────────────────────────────────
+const ENC_SALT    = "SGH-PRICELIST-BENCH-V1";
+const SESSION_KEY = "sgh_session";
+const LOCKOUT_KEY = "sgh_lockout";
+const SESSION_MS  = 8 * 60 * 60 * 1000;   // 8 hours
+const MAX_TRIES   = 5;
+const LOCKOUT_MS  = 15 * 60 * 1000;        // 15 minutes
 
+async function decryptData(password) {
+  const r = await fetch(process.env.PUBLIC_URL + "/benchmark_data.enc");
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const buf = Uint8Array.from(atob((await r.text()).trim()), c => c.charCodeAt(0));
+  const iv  = buf.slice(0, 12);
+  const tag = buf.slice(12, 28);
+  const ct  = buf.slice(28);
+  const ctTag = new Uint8Array(ct.length + 16);
+  ctTag.set(ct); ctTag.set(tag, ct.length);
+  const te  = new TextEncoder();
+  const km  = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: te.encode(ENC_SALT), iterations: 100000, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+  );
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ctTag);
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+function getSession() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    return s?.expires > Date.now() ? s : null;
+  } catch { return null; }
+}
+function saveSession(pw) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pw, expires: Date.now() + SESSION_MS }));
+}
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(LOCKOUT_KEY);
+}
+function getLockout() {
+  try { return JSON.parse(sessionStorage.getItem(LOCKOUT_KEY)); } catch { return null; }
+}
+function recordFail() {
+  const prev = getLockout() || { attempts: 0 };
+  const next = { attempts: prev.attempts + 1 };
+  if (next.attempts >= MAX_TRIES) next.lockedUntil = Date.now() + LOCKOUT_MS;
+  sessionStorage.setItem(LOCKOUT_KEY, JSON.stringify(next));
+  return next;
+}
+
+// ─── Password Gate ─────────────────────────────────────────────────────────────
 function PasswordGate({ onAuth }) {
-  const [input, setInput]   = useState("");
-  const [shake, setShake]   = useState(false);
+  const [input,    setInput]    = useState("");
+  const [status,   setStatus]   = useState("idle");
+  const [errMsg,   setErrMsg]   = useState("");
+  const [shake,    setShake]    = useState(false);
+  const [lockSecs, setLockSecs] = useState(0);
 
-  function attempt() {
-    if (input === PASSWORD) {
-      localStorage.setItem(AUTH_KEY, "1");
-      onAuth();
-    } else {
-      setShake(true);
-      setInput("");
-      setTimeout(() => setShake(false), 600);
+  useEffect(() => {
+    function tick() {
+      const l = getLockout();
+      if (l?.lockedUntil) {
+        const rem = Math.ceil((l.lockedUntil - Date.now()) / 1000);
+        if (rem > 0) { setLockSecs(rem); return; }
+        sessionStorage.removeItem(LOCKOUT_KEY);
+      }
+      setLockSecs(0);
+    }
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function attempt() {
+    if (lockSecs > 0 || status === "loading" || !input.trim()) return;
+    setStatus("loading"); setErrMsg("");
+    try {
+      const data = await decryptData(input);
+      saveSession(input);
+      onAuth(data);
+    } catch {
+      const fail = recordFail();
+      setShake(true); setInput(""); setTimeout(() => setShake(false), 600);
+      if (fail.lockedUntil) {
+        setLockSecs(Math.ceil((fail.lockedUntil - Date.now()) / 1000));
+        setErrMsg("Too many failed attempts. Locked for 15 minutes.");
+      } else {
+        const left = MAX_TRIES - fail.attempts;
+        setErrMsg(`Incorrect password. ${left} attempt${left === 1 ? "" : "s"} remaining.`);
+      }
+      setStatus("error");
     }
   }
 
+  const mins = Math.floor(lockSecs / 60);
+  const secs = lockSecs % 60;
+
   return (
-    <div style={{
-      minHeight: "100vh", background: C.canvas,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
+    <div style={{ minHeight: "100vh", background: C.canvas, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{
         background: C.white, borderRadius: 16, padding: "48px 40px",
         boxShadow: "0 8px 32px rgba(0,95,115,.13)", width: 360, textAlign: "center",
-        transform: shake ? "translateX(0)" : undefined,
         animation: shake ? "shake .5s ease" : undefined,
       }}>
         <img src={process.env.PUBLIC_URL + "/sgh.png"} alt="SGH"
-          style={{ height: 56, marginBottom: 24, filter: `brightness(0) saturate(100%) invert(19%) sepia(63%) saturate(800%) hue-rotate(163deg) brightness(90%) contrast(101%)` }} />
-        <div style={{ fontSize: 20, fontWeight: 800, color: C.teal, marginBottom: 6 }}>
-          Pricelist Benchmark
+          style={{ height: 56, marginBottom: 24, filter: "brightness(0) saturate(100%) invert(19%) sepia(63%) saturate(800%) hue-rotate(163deg) brightness(90%) contrast(101%)" }} />
+        <div style={{ fontSize: 20, fontWeight: 800, color: C.teal, marginBottom: 4 }}>Pricelist Benchmark</div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 28 }}>Authorized access only · SGH UAE Group</div>
+
+        {lockSecs > 0 ? (
+          <div style={{ padding: 16, background: C.redLt, borderRadius: 10, marginBottom: 8 }}>
+            <div style={{ color: C.red, fontWeight: 700, fontSize: 13 }}>Account locked</div>
+            <div style={{ color: C.red, fontSize: 26, fontWeight: 900, letterSpacing: 1, marginTop: 4 }}>
+              {mins}:{String(secs).padStart(2, "0")}
+            </div>
+            <div style={{ color: C.red, fontSize: 11, marginTop: 4 }}>Too many failed attempts</div>
+          </div>
+        ) : (
+          <>
+            <input
+              type="password" value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && attempt()}
+              placeholder="Password" autoFocus
+              style={{
+                width: "100%", padding: "10px 14px", fontSize: 15,
+                border: `1.5px solid ${errMsg ? C.red : C.border}`, borderRadius: 8,
+                outline: "none", marginBottom: 8, color: C.teal, fontFamily: "inherit",
+              }}
+            />
+            {errMsg && (
+              <div style={{ color: C.red, fontSize: 12, fontWeight: 600, marginBottom: 10, textAlign: "left" }}>
+                ⚠ {errMsg}
+              </div>
+            )}
+            <button onClick={attempt} disabled={status === "loading"} style={{
+              width: "100%", padding: "11px 0",
+              background: status === "loading" ? C.muted : C.teal,
+              color: C.white, border: "none", borderRadius: 8,
+              fontSize: 15, fontWeight: 700,
+              cursor: status === "loading" ? "not-allowed" : "pointer",
+            }}>
+              {status === "loading" ? "Verifying…" : "Access Dashboard"}
+            </button>
+          </>
+        )}
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 20 }}>
+          🔒 Data encrypted · Session expires after 8 hours
         </div>
-        <div style={{ fontSize: 13, color: C.muted, marginBottom: 32 }}>
-          Enter password to continue
-        </div>
-        <input
-          type="password"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && attempt()}
-          placeholder="Password"
-          autoFocus
-          style={{
-            width: "100%", padding: "10px 14px", fontSize: 15,
-            border: `1.5px solid ${C.border}`, borderRadius: 8,
-            outline: "none", marginBottom: 14, color: C.teal,
-            fontFamily: "inherit",
-          }}
-        />
-        <button onClick={attempt} style={{
-          width: "100%", padding: "11px 0", background: C.teal,
-          color: C.white, border: "none", borderRadius: 8,
-          fontSize: 15, fontWeight: 700, cursor: "pointer",
-        }}>
-          Access Dashboard
-        </button>
       </div>
       <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}`}</style>
     </div>
@@ -1047,21 +1168,31 @@ function PasswordGate({ onAuth }) {
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(() => localStorage.getItem(AUTH_KEY) === "1");
   const [data,            setData]            = useState(null);
   const [error,           setError]           = useState(null);
   const [view,            setView]            = useState("Summary");
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [authed,          setAuthed]          = useState(false);
+  const [sessionExpires,  setSessionExpires]  = useState(null);
 
+  // Restore session on mount
   useEffect(() => {
-    if (!authed) return;
-    fetch(process.env.PUBLIC_URL + "/benchmark_data.json")
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d)  => { setData(d); setSelectedCompany(d.companies[0]?.company || null); })
-      .catch((e) => setError(e.message));
-  }, [authed]);
+    const s = getSession();
+    if (!s) return;
+    decryptData(s.pw)
+      .then(d => { setData(d); setSelectedCompany(d.companies[0]?.company || null); setAuthed(true); setSessionExpires(s.expires); })
+      .catch(() => clearSession());
+  }, []);
 
-  if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
+  function handleAuth(d) {
+    const s = getSession();
+    setData(d); setSelectedCompany(d.companies[0]?.company || null);
+    setAuthed(true); setSessionExpires(s?.expires || null);
+  }
+
+  function logout() { clearSession(); setAuthed(false); setData(null); setError(null); setSessionExpires(null); }
+
+  if (!authed) return <PasswordGate onAuth={handleAuth} />;
 
   if (error) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
@@ -1092,7 +1223,8 @@ export default function App() {
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", background: C.canvas }}>
       <Nav view={view} setView={setView} generatedAt={data.generated_at}
-        refCount={data.reference_count} plCount={data.pricelist_count} />
+        refCount={data.reference_count} plCount={data.pricelist_count}
+        onLogout={logout} sessionExpires={sessionExpires} />
       {view === "Summary"        && <SummaryView       data={data} onSelectCompany={(c) => { setSelectedCompany(c); setView("Company Detail"); }} />}
       {view === "Company Detail" && <CompanyDetailView data={data} selectedCompany={selectedCompany} onSelectCompany={setSelectedCompany} />}
       {view === "Full Table"     && <FullTableView      data={data} />}

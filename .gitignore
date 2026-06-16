@@ -1,3 +1,7 @@
+# Unencrypted data — never commit plaintext pricing data
+/benchmark_data.json
+dashboard/public/benchmark_data.json
+
 # Python
 __pycache__/
 *.pyc
