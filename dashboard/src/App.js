@@ -1053,14 +1053,15 @@ export default function App() {
   const [view,            setView]            = useState("Summary");
   const [selectedCompany, setSelectedCompany] = useState(null);
 
-  if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
-
   useEffect(() => {
+    if (!authed) return;
     fetch(process.env.PUBLIC_URL + "/benchmark_data.json")
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((d)  => { setData(d); setSelectedCompany(d.companies[0]?.company || null); })
       .catch((e) => setError(e.message));
-  }, []);
+  }, [authed]);
+
+  if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
 
   if (error) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
